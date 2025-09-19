@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Trang quản trị</title>
+  <meta name="color-scheme" content="light dark" />
+  <style>
+    :root{
+      --bg:#0b1020; --card:#0f172a; --muted:#8ea0bf; --primary:#3b82f6; --primary-600:#2563eb;
+      --ring:rgba(59,130,246,.35); --border:#1f2a44; --text:#e9edf5; --shadow:0 10px 30px rgba(0,0,0,.4);
+      --tab:#111a30; --tab-active:#17213a; --ok:#16a34a; --err:#dc2626;
+    }
+    @media (prefers-color-scheme: light) {
+      :root{ --bg:#f7f9fc; --card:#ffffff; --text:#0f172a; --muted:#55627a; --border:#e5e7ef; --shadow:0 8px 22px rgba(23,30,60,.08);
+             --tab:#f2f4fa; --tab-active:#e9ecf6; }
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--text)}
+    .wrap{max-width:1100px;margin:24px auto;padding:0 16px}
+    .bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .bar .title{font-weight:800;font-size:20px}
+    .btn{padding:10px 14px;border:1px solid var(--border);border-radius:10px;background:var(--tab);color:var(--text);cursor:pointer}
+    .btn.primary{background:var(--primary);color:#fff;border-color:transparent}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    .tabs{display:flex;gap:8px;background:var(--tab);padding:6px;border-radius:12px;margin:10px 0 18px;border:1px solid var(--border)}
+    .tab-btn{flex:1;padding:10px;border-radius:8px;border:0;background:transparent;color:var(--muted);font-weight:700;cursor:pointer}
+    .tab-btn[aria-selected="true"]{background:var(--tab-active);color:var(--text)}
+    .panel{display:none}
+    .panel.active{display:block}
+    table{width:100%;border-collapse:collapse;border:1px solid var(--border);border-radius:12px;overflow:hidden}
+    th,td{padding:10px;border-bottom:1px solid var(--border);text-align:left;font-size:14px;vertical-align:top}
+    th{background:var(--tab)}
+    .grid{display:grid;grid-template-columns: repeat(auto-fit,minmax(240px,1fr)); gap:12px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:var(--shadow)}
+    .row{margin-bottom:12px}
+    input,select{padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:transparent;color:var(--text)}
+    .muted{color:var(--muted);font-size:13px}
+    .msg{margin-top:10px}
+    .ok{color:var(--ok)} .err{color:var(--err)}
+    .hint{font-size:12px;color:var(--muted);margin-top:4px}
+    .controls{display:flex;align-items:center;gap:8px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="bar">
+      <div class="title">Trang quản trị</div>
+      <div>
+        <button class="btn" onclick="goHome()">Trang login</button>
+        <button class="btn" onclick="logout()">Đăng xuất</button>
+      </div>
+    </div>
+
+    <div class="tabs" role="tablist">
+      <button id="tab-students" class="tab-btn" role="tab" aria-selected="true" aria-controls="panel-students">Sinh viên</button>
+      <button id="tab-group" class="tab-btn" role="tab" aria-selected="false" aria-controls="panel-group">Chia nhóm</button>
+      <button id="tab-result" class="tab-btn" role="tab" aria-selected="false" aria-controls="panel-result">Kết quả</button>
+    </div>
+
+    <!-- Panel: STUDENTS -->
+    <section id="panel-students" class="panel active">
+      <div class="card">
+        <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;">
+          <div class="muted">Dữ liệu lấy từ <code>data/gpa.csv</code></div>
+          <div class="controls">
+            <input id="stuSearch" placeholder="Từ khoá..." onkeydown="if(event.key==='Enter') { stuPage=1; refreshStudents(); }" />
+            <label class="muted">Hiển thị</label>
+            <select id="stuPageSize" onchange="stuChangePageSize(this.value)">
+              <option value="10">10</option>
+              <option value="25" selected>25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+            <button class="btn" onclick="stuPrev()">«</button>
+            <span id="stuPager" class="muted">Trang 1/1</span>
+            <button class="btn" onclick="stuNext()">»</button>
+            <button class="btn" onclick="refreshStudents()">Tải lại</button>
+          </div>
+        </div>
+        <div class="hint">Mẹo: dùng ô tìm kiếm của trình duyệt (Ctrl/Cmd + F) để lọc nhanh.</div>
+      </div>
+      <div id="studentsTable" class="card" style="margin-top:12px;overflow:auto"></div>
+    </section>
+
+    <!-- Panel: GROUP -->
+    <section id="panel-group" class="panel">
+      <div class="grid">
+        <div class="card">
+          <div class="row">
+            <label>Số người mỗi nhóm (ưu tiên)</label>
+            <input id="groupSize" type="number" min="2" placeholder="VD: 3" />
+            <div class="hint">Nếu nhập giá trị này, hệ thống sẽ chia theo đúng size và suy ra số nhóm.</div>
+          </div>
+          <div class="row">
+            <label>Số nhóm mỗi ca (tuỳ chọn)</label>
+            <input id="groupsPerCa" type="number" min="1" placeholder="VD: 3" />
+            <div class="hint">Chỉ dùng khi bạn không đặt “Số người mỗi nhóm”.</div>
+          </div>
+          <div class="row">
+            <button id="btnRun" class="btn primary" onclick="runGrouping()">Chia nhóm</button>
+            <span id="runMsg" class="msg muted"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Panel: RESULT -->
+    <section id="panel-result" class="panel">
+      <div class="card" style="display:flex;gap:8px;align-items:center;justify-content:space-between;">
+        <div class="muted">Thành viên từng nhóm</div>
+        <div class="controls">
+          <input id="memFilterCa" placeholder="Lọc Ca (vd: Ca1)" onkeydown="if(event.key==='Enter'){ memPage=1; refreshResult(); }" />
+          <input id="memFilterNhom" type="number" min="1" placeholder="Nhóm" onkeydown="if(event.key==='Enter'){ memPage=1; refreshResult(); }" />
+          <label class="muted">Hiển thị</label>
+          <select id="memPageSize" onchange="memChangePageSize(this.value)">
+            <option value="10">10</option>
+            <option value="25" selected>25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+          <button class="btn" onclick="memPrev()">«</button>
+          <span id="memPager" class="muted">Trang 1/1</span>
+          <button class="btn" onclick="memNext()">»</button>
+          <button class="btn" onclick="refreshResult()">Tải lại</button>
+        </div>
+      </div>
+      <div class="card" id="membersTable" style="overflow:auto"></div>
+    </section>
+  </div>
+
+  <script>
+    // ===== Helpers =====
+    function token(){ return localStorage.getItem('ADMIN_TOKEN') || sessionStorage.getItem('ADMIN_TOKEN'); }
+    function authHeader(){ return { 'X-Admin-Token': token() || '' }; }
+    function ensureAuth(){
+      if(!token()){ alert('Chưa đăng nhập admin. Quay lại trang login.'); location.href='/'; }
+    }
+    function goHome(){ location.href = '/'; }
+    function logout(){ localStorage.removeItem('ADMIN_TOKEN'); sessionStorage.removeItem('ADMIN_TOKEN'); location.href='/'; }
+
+    // Tabs
+    const tabs = [
+      {btn:'tab-students', panel:'panel-students'},
+      {btn:'tab-group', panel:'panel-group'},
+      {btn:'tab-result', panel:'panel-result'}
+    ];
+    tabs.forEach(t=>{
+      document.getElementById(t.btn).addEventListener('click', ()=>{
+        tabs.forEach(x=>{
+          document.getElementById(x.btn).setAttribute('aria-selected', x.btn===t.btn ? 'true':'false');
+          document.getElementById(x.panel).classList.toggle('active', x.btn===t.btn);
+        });
+        if(t.btn==='tab-students') refreshStudents();
+        if(t.btn==='tab-result') refreshResult();
+      });
+    });
+
+    // ===== Paging state =====
+    let stuPage = 1, stuPageSize = 25, stuTotalPages = 1;
+    let memPage = 1, memPageSize = 25, memTotalPages = 1;
+
+    // ===== Students =====
+    async function refreshStudents(){
+      ensureAuth();
+      const box = document.getElementById('studentsTable');
+      box.innerHTML = 'Đang tải...';
+
+      const q = document.getElementById('stuSearch').value || '';
+      const params = new URLSearchParams({ page: stuPage, page_size: stuPageSize });
+      if(q) params.set('q', q);
+
+      const resp = await fetch('/api/admin/students?' + params.toString(), { headers: authHeader() });
+      if(!resp.ok){ box.innerHTML = '<span class="err">Không tải được dữ liệu.</span>'; return; }
+      const data = await resp.json();
+      if(!data.ok){ box.innerHTML = '<span class="err">Không có dữ liệu.</span>'; return; }
+
+      const rows = data.rows || [];
+      stuTotalPages = data.total_pages || 1;
+      stuPage = data.page || 1;
+      document.getElementById('stuPager').textContent = `Trang ${stuPage}/${stuTotalPages} (${data.total||0} bản ghi)`;
+
+      if(rows.length===0){ box.innerHTML = '<span class="muted">Chưa có bản ghi.</span>'; return; }
+      const cols = ['Timestamp','Username','Mã SV','Tên','Lớp','GPA','Ca học','Công việc IT','Sở thích'];
+      let html = '<table><thead><tr>' + cols.map(c=>`<th>${c}</th>`).join('') + '</tr></thead><tbody>';
+      for(const r of rows){
+        html += '<tr>' + cols.map(c=>`<td>${(r[c]??'')}</td>`).join('') + '</tr>';
+      }
+      html += '</tbody></table>';
+      box.innerHTML = html;
+    }
+    function stuPrev(){ if(stuPage > 1){ stuPage--; refreshStudents(); } }
+    function stuNext(){ if(stuPage < stuTotalPages){ stuPage++; refreshStudents(); } }
+    function stuChangePageSize(v){ stuPageSize = parseInt(v)||25; stuPage = 1; refreshStudents(); }
+
+    // ===== Grouping =====
+    async function runGrouping(){
+      ensureAuth();
+      const btn = document.getElementById('btnRun');
+      const msg = document.getElementById('runMsg');
+      msg.className='msg muted'; msg.textContent='';
+      btn.disabled = true;
+
+      const groupSize = document.getElementById('groupSize').value.trim();
+      const groupsPerCa = document.getElementById('groupsPerCa').value.trim();
+
+      if(groupSize && parseInt(groupSize) < 2){
+        msg.className='msg err'; msg.textContent = 'Số người mỗi nhóm phải >= 2.';
+        btn.disabled = false; return;
+      }
+
+      const params = new URLSearchParams();
+      if(groupSize) params.set('group_size', groupSize);
+      if(!groupSize && groupsPerCa) params.set('groups_per_ca', groupsPerCa);
+
+      const resp = await fetch('/api/admin/group/run' + (params.toString()?`?${params.toString()}`:''), {
+        method:'POST', headers: { ...authHeader() }
+      });
+      const data = await resp.json().catch(()=>null);
+
+      if(!resp.ok || !data?.ok){
+        msg.className='msg err'; msg.textContent = data?.message || 'Chia nhóm thất bại.';
+      }else{
+        msg.className='msg ok'; msg.textContent = 'Đã chia nhóm. Mở tab "Kết quả" để xem.';
+        memPage = 1; // về trang đầu
+      }
+      btn.disabled = false;
+    }
+
+    // ===== Result =====
+    async function refreshResult(){
+      ensureAuth();
+      const box = document.getElementById('membersTable');
+      box.innerHTML = 'Đang tải...';
+
+      const params = new URLSearchParams({ page: memPage, page_size: memPageSize });
+      const ca = document.getElementById('memFilterCa').value || '';
+      const nhom = document.getElementById('memFilterNhom').value || '';
+      if(ca) params.set('ca', ca);
+      if(nhom) params.set('nhom', nhom);
+
+      const resp = await fetch('/api/admin/group/result?' + params.toString(), { headers: authHeader() });
+      const data = await resp.json().catch(()=>null);
+
+      if(!resp.ok || !data?.ok){
+        box.innerHTML = '<span class="muted">Chưa có kết quả. Hãy vào tab "Chia nhóm" và chạy chia nhóm.</span>';
+        document.getElementById('memPager').textContent = 'Trang 1/1';
+        memTotalPages = 1; memPage = 1;
+        return;
+      }
+
+      const rows = data.rows || [];
+      memTotalPages = data.total_pages || 1;
+      memPage = data.page || 1;
+      document.getElementById('memPager').textContent = `Trang ${memPage}/${memTotalPages} (${data.total||0} dòng)`;
+
+      renderMembers(rows);
+    }
+
+    function renderMembers(rows){
+      if(!rows?.length){ document.getElementById('membersTable').innerHTML = '<span class="muted">Không có dữ liệu.</span>'; return; }
+      const cols = ['Mã SV','Tên','Lớp','Ca','GPA','Nhóm','GPA TB Nhóm'];
+      let html = '<table><thead><tr>' + cols.map(c=>`<th>${c}</th>`).join('') + '</tr></thead><tbody>';
+      for(const r of rows){
+        html += '<tr>' + cols.map(c=>`<td>${(r[c]??'')}</td>`).join('') + '</tr>';
+      }
+      html += '</tbody></table>';
+      document.getElementById('membersTable').innerHTML = html;
+    }
+
+    // >>> Các HÀM PHÂN TRANG BỊ THIẾU – đã bổ sung <<<
+    function memPrev(){ if(memPage > 1){ memPage--; refreshResult(); } }
+    function memNext(){ if(memPage < memTotalPages){ memPage++; refreshResult(); } }
+    function memChangePageSize(v){ memPageSize = parseInt(v)||25; memPage = 1; refreshResult(); }
+
+    // init
+    ensureAuth();
+    refreshStudents();
+  </script>
+</body>
+</html>

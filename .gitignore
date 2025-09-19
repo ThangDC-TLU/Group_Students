@@ -1,0 +1,56 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+
+# --- Virtual envs ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Env / secrets ---
+.env
+.env.*
+*.pem
+*.key
+
+# --- Testing / type-check ---
+.pytest_cache/
+.tox/
+.mypy_cache/
+.pyre/
+.pytype/
+.coverage
+.coverage.*
+htmlcov/
+
+# --- Logs ---
+logs/
+*.log
+*.pid
+
+# --- Editors / IDE ---
+.vscode/
+.idea/
+*.code-workspace
+
+# --- OS junk ---
+.DS_Store
+Thumbs.db
+
+# --- Uvicorn / runtime ---
+uvicorn*.json
+
+# --- App data (keep folder, ignore generated CSV) ---
+data/*
+!data/.gitkeep
+!data/README.md
+# Nếu cần giữ các file mẫu, bỏ comment dòng dưới:
+# !data/sample*.csv
+
+# --- Static build artifacts (nếu bạn build gì đó vào đây) ---
+# static/build/
