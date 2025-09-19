@@ -34,8 +34,15 @@ STATIC_DIR = os.path.join(ROOT_DIR, 'static')
 INDEX_HTML = os.path.join(TEMPLATES_DIR, 'index.html')
 ADMIN_HTML = os.path.join(TEMPLATES_DIR, 'admin.html')
 
-CSV_PATH = os.path.join(DATA_DIR, 'gpa.csv')                # nguồn dữ liệu sinh viên
-RESULT_PATH = os.path.join(DATA_DIR, 'chianhom.csv')        # nơi lưu kết quả chia nhóm
+# File theo dataset
+STUDENTS_FILE = {
+    "data":     os.path.join(DATA_DIR, "data.csv"),
+    "data_h2":  os.path.join(DATA_DIR, "data_h2.csv"),
+}
+RESULT_FILE = {
+    "data":     os.path.join(DATA_DIR, "chianhom.csv"),
+    "data_h2":  os.path.join(DATA_DIR, "chianhom_h2.csv"),
+}
 
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
@@ -48,28 +55,29 @@ ADMIN_PASS = os.getenv('ADMIN_PASS', 'admin123')
 CSV_HEADERS = ['Timestamp','Username','Mã SV','Tên','Lớp','GPA','Ca học','Công việc IT','Sở thích']
 RESULT_HEADERS = ['Mã SV', 'Tên', 'Lớp', 'Ca', 'GPA', 'Nhóm', 'GPA TB Nhóm']
 
-# ====== Tối ưu (2): HÀNG ĐỢI GHI CSV (non-blocking) ======
+# ====== HÀNG ĐỢI GHI CSV (non-blocking) ======
 csv_lock = threading.Lock()
+# queue item: {"path": "...csv", "row": {...}}
 write_q: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=2000)
 
-def read_csv_rows() -> List[Dict[str, str]]:
+def _read_csv_rows(path: str) -> List[Dict[str, str]]:
     rows: List[Dict[str, str]] = []
-    if not os.path.exists(CSV_PATH) or os.path.getsize(CSV_PATH) == 0:
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
         return rows
-    with open(CSV_PATH, 'r', newline='', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        for r in reader: rows.append(r)
+    with open(path, 'r', newline='', encoding='utf-8') as f:
+        for r in csv.DictReader(f):
+            rows.append(r)
     return rows
 
-def write_csv_rows(rows: List[Dict[str, str]]):
-    with open(CSV_PATH, 'w', newline='', encoding='utf-8') as f:
+def _write_csv_rows(path: str, rows: List[Dict[str, str]]):
+    with open(path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=CSV_HEADERS, quoting=csv.QUOTE_MINIMAL)
         writer.writeheader(); writer.writerows(rows)
 
-def upsert_csv(rec: Dict[str, Any]):
-    """Ghi đè theo Username (nếu đã tồn tại) - dùng lock để an toàn I/O"""
+def _upsert_csv(path: str, rec: Dict[str, Any]):
+    """Ghi đè theo Username ở file path"""
     with csv_lock:
-        rows = read_csv_rows()
+        rows = _read_csv_rows(path)
         idx = None
         for i, r in enumerate(rows):
             if r.get('Username','').strip() == str(rec['Username']).strip():
@@ -77,25 +85,24 @@ def upsert_csv(rec: Dict[str, Any]):
         row_str = {k: ('' if rec.get(k) is None else str(rec.get(k))) for k in CSV_HEADERS}
         if idx is None: rows.append(row_str)
         else: rows[idx] = row_str
-        write_csv_rows(rows)
+        _write_csv_rows(path, rows)
 
 def writer_worker():
     while True:
-        rec = write_q.get()
+        item = write_q.get()
         try:
-            upsert_csv(rec)
+            _upsert_csv(item["path"], item["row"])
         except Exception:
-            # không raise để thread không chết; có thể log nếu cần
             pass
         finally:
             write_q.task_done()
 
 threading.Thread(target=writer_worker, daemon=True).start()
 
-# ====== Tối ưu (3): THROTTLING THEO USERNAME ======
+# ====== THROTTLING THEO USERNAME ======
 THROTTLE_WINDOW_SEC = 10
 _throttle_lock = threading.Lock()
-_last_save: Dict[str, float] = {}  # username -> timestamp
+_last_save: Dict[str, float] = {}
 
 def throttled(username: str, window: int = THROTTLE_WINDOW_SEC) -> bool:
     now = time.time()
@@ -106,8 +113,8 @@ def throttled(username: str, window: int = THROTTLE_WINDOW_SEC) -> bool:
         _last_save[username] = now
         return False
 
-# cache kết quả nhóm (RAM)
-LAST_GROUP_RESULT: Optional[Dict[str, Any]] = None
+# cache kết quả nhóm (theo dataset)
+LAST_GROUP_RESULT: Dict[str, Dict[str, Any]] = {}
 
 # ========== Nhãn công việc & sở thích ==========
 JOB_LABELS = {
@@ -124,25 +131,16 @@ HOBBY_LABELS = {
 
 # ========== Ca học (kỳ 13) ==========
 SCHEDULE_PATH = '/api/StudentCourseSubject/studentLoginUser/13'
-CODE_TO_CA = {
+
+CODE_TO_CA_64HTTT1 = {
     '251071_CSE414_64HTTT1_1': 'Ca1',
-    '251071_CSE414_64HTTT1_2': 'Ca2'
+    '251071_CSE414_64HTTT1_2': 'Ca2',
+}
+CODE_TO_CA_64HTTT2 = {
+    '251071_CSE414_64HTTT2_1': 'Ca1',
+    '251071_CSE414_64HTTT2_2': 'Ca2',
 }
 
-# ================== APP ==================
-app = FastAPI(title="Lưu GPA (FastAPI)",
-              description="Backend Python lưu GPA vào CSV và chia nhóm, có hàng đợi ghi & throttling",
-              version="1.2.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"], allow_credentials=True,
-    allow_methods=["*"], allow_headers=["*"],
-)
-
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
-# ================== HELPERS ==================
 def now_vn_str() -> str:
     dt_utc = datetime.now(timezone.utc)
     dt_vn = dt_utc.astimezone()
@@ -193,22 +191,59 @@ def normalize_hobbies(hobbies: Any, hobby_other: Optional[str] = None) -> Option
             if lab == 'Khác':
                 labels[i] = f"Khác: {extra}" if extra else 'Khác'
                 break
-    # Chuỗi sẽ được quote khi ghi CSV
     return ', '.join(labels) if labels else None
 
-def write_chianhom_csv(rows: List[Dict[str, Any]]):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(RESULT_PATH, 'w', newline='', encoding='utf-8') as f:
+def _dataset_paths(dataset: str):
+    """Trả về (students_csv, result_csv). dataset: 'data' hoặc 'data_h2'"""
+    ds = 'data_h2' if dataset == 'data_h2' else 'data'
+    return STUDENTS_FILE[ds], RESULT_FILE[ds]
+
+def _detect_ca_and_dataset(access_token: str, clazz_hint: str) -> (Optional[str], str):
+    """
+    Trả về (label_ca, dataset_key). dataset_key in {'data','data_h2'}.
+    Ưu tiên theo mã lớp trong thời khoá biểu; nếu không chắc, dùng clazz_hint.
+    """
+    try:
+        url = f"{BASE_URL}{SCHEDULE_PATH}"
+        resp = requests.get(url, headers={'Authorization': f'Bearer {access_token}'}, timeout=20, verify=REQUESTS_VERIFY)
+        if resp.status_code >= 400:
+            # fallback theo lớp
+            if '64HTTT2' in (clazz_hint or ''): return None, 'data_h2'
+            return None, 'data'
+        data = resp.json()
+        items = data if isinstance(data, list) else data.get('data', [])
+        labels = set()
+        got_h2 = False
+        got_h1 = False
+        for it in items:
+            code = (safe_get(it, 'courseSubject.code','') or safe_get(it,'classCode','') or safe_get(it,'code','')).strip()
+            if code in CODE_TO_CA_64HTTT2:
+                labels.add(CODE_TO_CA_64HTTT2[code]); got_h2 = True
+            if code in CODE_TO_CA_64HTTT1:
+                labels.add(CODE_TO_CA_64HTTT1[code]); got_h1 = True
+        # chọn dataset
+        dataset = 'data_h2' if got_h2 else ('data' if got_h1 else ('data_h2' if '64HTTT2' in (clazz_hint or '') else 'data'))
+        ca_label = ', '.join(sorted(labels)) if labels else None
+        return ca_label, dataset
+    except Exception:
+        # fallback theo lớp
+        if '64HTTT2' in (clazz_hint or ''): return None, 'data_h2'
+        return None, 'data'
+
+def _write_result_csv(dataset: str, rows: List[Dict[str, Any]]):
+    _, result_path = _dataset_paths(dataset)
+    with open(result_path, 'w', newline='', encoding='utf-8') as f:
         w = csv.DictWriter(f, fieldnames=RESULT_HEADERS, quoting=csv.QUOTE_MINIMAL)
         w.writeheader()
         for r in rows:
             w.writerow({k: ('' if r.get(k) is None else r.get(k)) for k in RESULT_HEADERS})
 
-def read_chianhom_csv() -> List[Dict[str, Any]]:
-    if not os.path.exists(RESULT_PATH) or os.path.getsize(RESULT_PATH) == 0:
+def _read_result_csv(dataset: str) -> List[Dict[str, Any]]:
+    _, result_path = _dataset_paths(dataset)
+    if not os.path.exists(result_path) or os.path.getsize(result_path) == 0:
         return []
     out: List[Dict[str, Any]] = []
-    with open(RESULT_PATH, 'r', newline='', encoding='utf-8') as f:
+    with open(result_path, 'r', newline='', encoding='utf-8') as f:
         for r in csv.DictReader(f):
             rr: Dict[str, Any] = dict(r)
             rr['Nhóm'] = int(float(rr['Nhóm'])) if rr.get('Nhóm') not in (None,'','NaN') else ''
@@ -216,24 +251,6 @@ def read_chianhom_csv() -> List[Dict[str, Any]]:
             rr['GPA TB Nhóm'] = float(rr['GPA TB Nhóm']) if rr.get('GPA TB Nhóm') not in (None,'','NaN') else ''
             out.append(rr)
     return out
-
-def fetch_ca_hoc(access_token: str) -> Optional[str]:
-    try:
-        url = f"{BASE_URL}{SCHEDULE_PATH}"
-        resp = requests.get(url, headers={'Authorization': f'Bearer {access_token}'},
-                            timeout=20, verify=REQUESTS_VERIFY)
-        if resp.status_code >= 400: return None
-        data = resp.json()
-        items = data if isinstance(data, list) else data.get('data', [])
-        labels = set()
-        for it in items:
-            code = (safe_get(it, 'courseSubject.code','') or safe_get(it,'classCode','') or safe_get(it,'code',''))
-            ca = CODE_TO_CA.get(str(code).strip())
-            if ca: labels.add(ca)
-        if not labels: return None
-        return ', '.join(sorted(labels))
-    except Exception:
-        return None
 
 # ================== SCHEMAS ==================
 class SaveGPAIn(BaseModel):
@@ -248,7 +265,19 @@ class AdminLoginIn(BaseModel):
     username: str
     password: str
 
-# ================== ROUTES: PAGES ==================
+# ================== PAGES ==================
+app = FastAPI(title="Lưu GPA (FastAPI)",
+              description="Lưu theo dataset (64HTTT1/64HTTT2), chia nhóm và phân trang.",
+              version="1.3.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], allow_credentials=True,
+    allow_methods=["*"], allow_headers=["*"],
+)
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
 @app.get("/", response_class=FileResponse)
 def home():
     return FileResponse(INDEX_HTML, media_type="text/html")
@@ -257,14 +286,13 @@ def home():
 def admin_page():
     return FileResponse(ADMIN_HTML, media_type="text/html")
 
-# ================== ROUTES: STUDENT FLOW ==================
+# ================== STUDENT FLOW ==================
 @app.post("/api/gpa/save")
 def save_gpa(payload: SaveGPAIn):
-    # Throttling mềm theo username
     if throttled(payload.username):
         return {'ok': True, 'message': 'Đã nhận yêu cầu gần đây. Vui lòng thử lại sau vài giây.'}
 
-    # 1) Lấy token
+    # 1) Token
     try:
         form = {'grant_type':'password','client_id':CLIENT_ID,'client_secret':CLIENT_SECRET,
                 'username':payload.username,'password':payload.password}
@@ -282,7 +310,7 @@ def save_gpa(payload: SaveGPAIn):
     except Exception as e:
         return JSONResponse(status_code=500, content={'message':'Lỗi lấy token','error':str(e)})
 
-    # 2) Gọi GPA
+    # 2) GPA
     try:
         resp = requests.get(f"{BASE_URL}/api/studentsummarymark/getbystudent",
                             headers={'Authorization': f'Bearer {tok}'},
@@ -299,14 +327,15 @@ def save_gpa(payload: SaveGPAIn):
     # 3) Parse
     info = extract_from_payload(payload_gpa, payload.username)
 
-    # 4) Lấy Ca học
-    ca_hoc = fetch_ca_hoc(tok)
+    # 4) Ca + dataset
+    ca_hoc, dataset = _detect_ca_and_dataset(access_token=tok, clazz_hint=info['clazz'])
+    students_csv, _ = _dataset_paths(dataset)
 
-    # 5) Chuẩn hóa job/hobbies
+    # 5) Chuẩn hoá job/hobby
     job_text = normalize_job(payload.job, payload.jobOther)
     hobbies_text = normalize_hobbies(payload.hobbies, payload.hobbyOther)
 
-    # 6) Xếp hàng để ghi CSV (non-blocking)
+    # 6) Hàng đợi ghi
     rec = {
         'Timestamp': now_vn_str(),
         'Username': payload.username,
@@ -319,15 +348,14 @@ def save_gpa(payload: SaveGPAIn):
         'Sở thích': hobbies_text or '',
     }
     try:
-        write_q.put_nowait(rec)   # ghi nền
+        write_q.put_nowait({"path": students_csv, "row": rec})
     except queue.Full:
-        # fallback hiếm gặp nếu hàng đợi đầy
         try:
-            upsert_csv(rec)
+            _upsert_csv(students_csv, rec)
         except Exception as e:
             return JSONResponse(status_code=500, content={'message':'Lỗi ghi CSV','error':str(e)})
 
-    return {'ok': True, 'message': 'Đăng nhập thành công và đã lưu dữ liệu.'}
+    return {'ok': True, 'message': f'Đã lưu vào {os.path.basename(students_csv)}.'}
 
 # ================== ADMIN AUTH ==================
 @app.post("/api/admin/login")
@@ -494,13 +522,15 @@ def chia_nhom_tuong_dong(dssv, so_nhom_mong_muon_moi_ca=None, so_luong_moi_nhom=
         ket_qua[ca] = groups
     return ket_qua
 
-def run_grouping(group_size: Optional[int], groups_per_ca: Optional[int]) -> Dict[str, Any]:
-    if not os.path.exists(CSV_PATH) or os.path.getsize(CSV_PATH) == 0:
-        return {'ok': False, 'message': 'Chưa có dữ liệu sinh viên.'}
+def _run_grouping_for_dataset(dataset: str,
+                              group_size: Optional[int],
+                              groups_per_ca: Optional[int]) -> Dict[str, Any]:
+    students_csv, _ = _dataset_paths(dataset)
+    if not os.path.exists(students_csv) or os.path.getsize(students_csv) == 0:
+        return {'ok': False, 'message': f'Chưa có dữ liệu sinh viên ({os.path.basename(students_csv)}).'}
 
-    # Đọc CSV một lần (giảm lock time)
     with csv_lock:
-        df_raw = pd.read_csv(CSV_PATH, dtype=str, encoding='utf-8', engine='python')
+        df_raw = pd.read_csv(students_csv, dtype=str, encoding='utf-8', engine='python')
     df = clean_dataframe(df_raw)
     if df.empty:
         return {'ok': False, 'message': 'Dữ liệu sau khi làm sạch rỗng.'}
@@ -521,7 +551,7 @@ def run_grouping(group_size: Optional[int], groups_per_ca: Optional[int]) -> Dic
                     'Mã SV': sv.get('Mã SV') or '',
                     'Tên': sv.get('Tên') or '',
                     'Lớp': sv.get('Lớp') or '',
-                    'Ca': ca,  # chính là "Ca học"
+                    'Ca': ca,
                     'GPA': (round(float(sv.get('GPA')), 2) if sv.get('GPA') not in (None, '') else ''),
                     'Nhóm': idx,
                     'GPA TB Nhóm': gpa_tb
@@ -530,16 +560,15 @@ def run_grouping(group_size: Optional[int], groups_per_ca: Optional[int]) -> Dic
     if not rows:
         return {'ok': False, 'message': 'Không tạo được kết quả chia nhóm.'}
 
-    write_chianhom_csv(rows)
+    _write_result_csv(dataset, rows)
+    LAST_GROUP_RESULT[dataset] = {'ok': True, 'rows': rows}
+    return LAST_GROUP_RESULT[dataset]
 
-    global LAST_GROUP_RESULT
-    LAST_GROUP_RESULT = {'ok': True, 'rows': rows}
-    return LAST_GROUP_RESULT
-
-# ================== ROUTES: ADMIN DATA (PHÂN TRANG) ==================
+# ================== ROUTES: ADMIN DATA (PHÂN TRANG + DATASET) ==================
 @app.get("/api/admin/students")
 def admin_students(
     x_admin_token: Optional[str] = Header(None),
+    dataset: str = Query("data", pattern="^(data|data_h2)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=200),
     q: Optional[str] = Query(None, description="Từ khoá lọc (tuỳ chọn)")
@@ -547,16 +576,15 @@ def admin_students(
     err = require_admin(x_admin_token)
     if err: return err
 
+    students_csv, _ = _dataset_paths(dataset)
     with csv_lock:
-        rows = read_csv_rows()
+        rows = _read_csv_rows(students_csv)
 
-    # Lọc theo từ khoá
     if q:
         ql = q.lower()
         keys = ['Username','Mã SV','Tên','Lớp','Ca học','Công việc IT','Sở thích']
         rows = [r for r in rows if any(ql in (r.get(k,'').lower()) for k in keys)]
 
-    # Sắp xếp Timestamp giảm dần
     from datetime import datetime as _dt
     def parse_ts(s):
         try:
@@ -571,35 +599,40 @@ def admin_students(
     page_rows = rows[start:end]
     total_pages = max(1, (total + page_size - 1) // page_size)
 
-    return {'ok': True, 'rows': page_rows, 'page': page, 'page_size': page_size, 'total': total, 'total_pages': total_pages}
+    return {
+        'ok': True, 'rows': page_rows, 'page': page, 'page_size': page_size,
+        'total': total, 'total_pages': total_pages,
+        'file': os.path.basename(students_csv)
+    }
 
 @app.post("/api/admin/group/run")
 def api_group_run(
     x_admin_token: Optional[str] = Header(None),
+    dataset: str = Query("data", pattern="^(data|data_h2)$"),
     group_size: Optional[int] = Query(None, ge=2, description="Số người mỗi nhóm (ưu tiên)"),
     groups_per_ca: Optional[int] = Query(None, ge=1, description="Số nhóm mỗi ca (nếu không đặt group_size)")
 ):
     err = require_admin(x_admin_token)
     if err: return err
-    res = run_grouping(group_size, groups_per_ca)
+    res = _run_grouping_for_dataset(dataset, group_size, groups_per_ca)
     return JSONResponse(status_code=200 if res.get('ok') else 400, content=res)
 
 @app.get("/api/admin/group/result")
 def api_group_result(
     x_admin_token: Optional[str] = Header(None),
+    dataset: str = Query("data", pattern="^(data|data_h2)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=200),
-    ca: Optional[str] = Query(None, description="Lọc theo Ca (tuỳ chọn)"),
-    nhom: Optional[int] = Query(None, description="Lọc theo số Nhóm (tuỳ chọn)")
+    ca: Optional[str] = Query(None, description="Lọc theo Ca"),
+    nhom: Optional[int] = Query(None, description="Lọc theo số Nhóm")
 ):
     err = require_admin(x_admin_token)
     if err: return err
 
-    rows = read_chianhom_csv()
+    rows = _read_result_csv(dataset)
     if not rows:
-        # fallback RAM nếu vừa chạy mà chưa đọc file
-        if LAST_GROUP_RESULT and LAST_GROUP_RESULT.get('rows'):
-            rows = LAST_GROUP_RESULT['rows']
+        if dataset in LAST_GROUP_RESULT and LAST_GROUP_RESULT[dataset].get('rows'):
+            rows = LAST_GROUP_RESULT[dataset]['rows']
         else:
             return JSONResponse(status_code=404, content={'ok': False, 'message': 'Chưa có kết quả. Hãy chạy chia nhóm trước.'})
 
@@ -614,12 +647,13 @@ def api_group_result(
     page_rows = rows[start:end]
     total_pages = max(1, (total + page_size - 1) // page_size)
 
-    return {'ok': True, 'rows': page_rows, 'page': page, 'page_size': page_size, 'total': total, 'total_pages': total_pages}
+    return {
+        'ok': True, 'rows': page_rows, 'page': page, 'page_size': page_size,
+        'total': total, 'total_pages': total_pages,
+        'file': os.path.basename(_dataset_paths(dataset)[1])
+    }
 
 # ================== MAIN ==================
 if __name__ == "__main__":
-    # Tối ưu (4): chạy production đúng cách
-    # - Dùng 1 worker khi lưu CSV dùng lock trong process (tránh ghi chéo giữa nhiều process).
-    #   Khi chuyển sang DB (SQLite WAL) có thể tăng workers lên 2-4.
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=3535, reload=False, workers=1)

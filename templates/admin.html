@@ -29,24 +29,29 @@
     .panel{display:none}
     .panel.active{display:block}
     table{width:100%;border-collapse:collapse;border:1px solid var(--border);border-radius:12px;overflow:hidden}
-    th,td{padding:10px;border-bottom:1px solid var(--border);text-align:left;font-size:14px;vertical-align:top}
+    th,td{padding:10px;border-bottom:1px solid var(--border);text-align:left;font-size:14px}
     th{background:var(--tab)}
     .grid{display:grid;grid-template-columns: repeat(auto-fit,minmax(240px,1fr)); gap:12px}
     .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:var(--shadow)}
     .row{margin-bottom:12px}
-    input,select{padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:transparent;color:var(--text)}
+    input,select{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:transparent;color:var(--text)}
     .muted{color:var(--muted);font-size:13px}
     .msg{margin-top:10px}
     .ok{color:var(--ok)} .err{color:var(--err)}
     .hint{font-size:12px;color:var(--muted);margin-top:4px}
-    .controls{display:flex;align-items:center;gap:8px}
+    .flex{display:flex;gap:8px;align-items:center}
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="bar">
       <div class="title">Trang quản trị</div>
-      <div>
+      <div class="flex">
+        <label>Dataset:</label>
+        <select id="datasetSelect">
+          <option value="data">64HTTT1 (data.csv)</option>
+          <option value="data_h2">64HTTT2 (data_h2.csv)</option>
+        </select>
         <button class="btn" onclick="goHome()">Trang login</button>
         <button class="btn" onclick="logout()">Đăng xuất</button>
       </div>
@@ -58,44 +63,28 @@
       <button id="tab-result" class="tab-btn" role="tab" aria-selected="false" aria-controls="panel-result">Kết quả</button>
     </div>
 
-    <!-- Panel: STUDENTS -->
+    <!-- STUDENTS -->
     <section id="panel-students" class="panel active">
-      <div class="card">
-        <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;">
-          <div class="muted">Dữ liệu lấy từ <code>data/gpa.csv</code></div>
-          <div class="controls">
-            <input id="stuSearch" placeholder="Từ khoá..." onkeydown="if(event.key==='Enter') { stuPage=1; refreshStudents(); }" />
-            <label class="muted">Hiển thị</label>
-            <select id="stuPageSize" onchange="stuChangePageSize(this.value)">
-              <option value="10">10</option>
-              <option value="25" selected>25</option>
-              <option value="50">50</option>
-              <option value="100">100</option>
-            </select>
-            <button class="btn" onclick="stuPrev()">«</button>
-            <span id="stuPager" class="muted">Trang 1/1</span>
-            <button class="btn" onclick="stuNext()">»</button>
-            <button class="btn" onclick="refreshStudents()">Tải lại</button>
-          </div>
-        </div>
-        <div class="hint">Mẹo: dùng ô tìm kiếm của trình duyệt (Ctrl/Cmd + F) để lọc nhanh.</div>
+      <div class="card flex" style="justify-content:space-between;">
+        <div class="muted">Nguồn: <code id="fileIndicator">data.csv</code></div>
+        <div><button class="btn" onclick="refreshStudents()">Tải lại</button></div>
       </div>
+      <div class="card hint">Dùng Ctrl/Cmd + F để lọc nhanh.</div>
       <div id="studentsTable" class="card" style="margin-top:12px;overflow:auto"></div>
+      <div id="studentsPager" class="card flex" style="justify-content:space-between;margin-top:8px"></div>
     </section>
 
-    <!-- Panel: GROUP -->
+    <!-- GROUP -->
     <section id="panel-group" class="panel">
       <div class="grid">
         <div class="card">
           <div class="row">
             <label>Số người mỗi nhóm (ưu tiên)</label>
             <input id="groupSize" type="number" min="2" placeholder="VD: 3" />
-            <div class="hint">Nếu nhập giá trị này, hệ thống sẽ chia theo đúng size và suy ra số nhóm.</div>
           </div>
           <div class="row">
             <label>Số nhóm mỗi ca (tuỳ chọn)</label>
             <input id="groupsPerCa" type="number" min="1" placeholder="VD: 3" />
-            <div class="hint">Chỉ dùng khi bạn không đặt “Số người mỗi nhóm”.</div>
           </div>
           <div class="row">
             <button id="btnRun" class="btn primary" onclick="runGrouping()">Chia nhóm</button>
@@ -105,27 +94,14 @@
       </div>
     </section>
 
-    <!-- Panel: RESULT -->
+    <!-- RESULT -->
     <section id="panel-result" class="panel">
-      <div class="card" style="display:flex;gap:8px;align-items:center;justify-content:space-between;">
-        <div class="muted">Thành viên từng nhóm</div>
-        <div class="controls">
-          <input id="memFilterCa" placeholder="Lọc Ca (vd: Ca1)" onkeydown="if(event.key==='Enter'){ memPage=1; refreshResult(); }" />
-          <input id="memFilterNhom" type="number" min="1" placeholder="Nhóm" onkeydown="if(event.key==='Enter'){ memPage=1; refreshResult(); }" />
-          <label class="muted">Hiển thị</label>
-          <select id="memPageSize" onchange="memChangePageSize(this.value)">
-            <option value="10">10</option>
-            <option value="25" selected>25</option>
-            <option value="50">50</option>
-            <option value="100">100</option>
-          </select>
-          <button class="btn" onclick="memPrev()">«</button>
-          <span id="memPager" class="muted">Trang 1/1</span>
-          <button class="btn" onclick="memNext()">»</button>
-          <button class="btn" onclick="refreshResult()">Tải lại</button>
-        </div>
+      <div class="card flex" style="justify-content:space-between;">
+        <div class="muted">Thành viên từng nhóm (đọc từ file kết quả của dataset đã chọn)</div>
+        <div><button class="btn" onclick="refreshResult()">Tải lại</button></div>
       </div>
-      <div class="card" id="membersTable" style="overflow:auto"></div>
+      <div id="membersTable" class="card" style="overflow:auto"></div>
+      <div id="resultPager" class="card flex" style="justify-content:space-between;margin-top:8px"></div>
     </section>
   </div>
 
@@ -133,11 +109,20 @@
     // ===== Helpers =====
     function token(){ return localStorage.getItem('ADMIN_TOKEN') || sessionStorage.getItem('ADMIN_TOKEN'); }
     function authHeader(){ return { 'X-Admin-Token': token() || '' }; }
-    function ensureAuth(){
-      if(!token()){ alert('Chưa đăng nhập admin. Quay lại trang login.'); location.href='/'; }
-    }
+    function ensureAuth(){ if(!token()){ alert('Chưa đăng nhập admin.'); location.href='/'; } }
     function goHome(){ location.href = '/'; }
     function logout(){ localStorage.removeItem('ADMIN_TOKEN'); sessionStorage.removeItem('ADMIN_TOKEN'); location.href='/'; }
+
+    // dataset select
+    const dsSel = document.getElementById('datasetSelect');
+    dsSel.value = localStorage.getItem('DATASET') || 'data';
+    dsSel.addEventListener('change', () => {
+      localStorage.setItem('DATASET', dsSel.value);
+      document.getElementById('fileIndicator').textContent = dsSel.value === 'data' ? 'data.csv' : 'data_h2.csv';
+      refreshStudents();
+      refreshResult();
+    });
+    document.getElementById('fileIndicator').textContent = dsSel.value === 'data' ? 'data.csv' : 'data_h2.csv';
 
     // Tabs
     const tabs = [
@@ -156,122 +141,128 @@
       });
     });
 
-    // ===== Paging state =====
-    let stuPage = 1, stuPageSize = 25, stuTotalPages = 1;
-    let memPage = 1, memPageSize = 25, memTotalPages = 1;
+    // ===== Students (paging) =====
+  // Gọi như cũ: refreshStudents(); hoặc refreshStudents(1)
+    async function refreshStudents(page=1, pageSize=25, q=''){
+        ensureAuth();
+        const box = document.getElementById('studentsTable');
+        box.innerHTML = 'Đang tải...';
 
-    // ===== Students =====
-    async function refreshStudents(){
-      ensureAuth();
-      const box = document.getElementById('studentsTable');
-      box.innerHTML = 'Đang tải...';
+        const params = new URLSearchParams({ page, page_size: pageSize });
+        if (q) params.set('q', q);
 
-      const q = document.getElementById('stuSearch').value || '';
-      const params = new URLSearchParams({ page: stuPage, page_size: stuPageSize });
-      if(q) params.set('q', q);
+        const resp = await fetch('/api/admin/students?' + params.toString(), { headers: authHeader() });
+        if(!resp.ok){ box.innerHTML = '<span class="err">Không tải được dữ liệu.</span>'; return; }
+        const data = await resp.json();
+        if(!data.ok){ box.innerHTML = '<span class="err">Không có dữ liệu.</span>'; return; }
 
-      const resp = await fetch('/api/admin/students?' + params.toString(), { headers: authHeader() });
-      if(!resp.ok){ box.innerHTML = '<span class="err">Không tải được dữ liệu.</span>'; return; }
-      const data = await resp.json();
-      if(!data.ok){ box.innerHTML = '<span class="err">Không có dữ liệu.</span>'; return; }
+        const rows = data.rows || [];
+        if(rows.length===0){ box.innerHTML = '<span class="muted">Chưa có bản ghi.</span>'; return; }
 
-      const rows = data.rows || [];
-      stuTotalPages = data.total_pages || 1;
-      stuPage = data.page || 1;
-      document.getElementById('stuPager').textContent = `Trang ${stuPage}/${stuTotalPages} (${data.total||0} bản ghi)`;
+        const curPage = data.page || 1;
+        const pageSz  = data.page_size || rows.length;
+        const total   = data.total || rows.length;
+        const totalPages = data.total_pages || 1;
 
-      if(rows.length===0){ box.innerHTML = '<span class="muted">Chưa có bản ghi.</span>'; return; }
-      const cols = ['Timestamp','Username','Mã SV','Tên','Lớp','GPA','Ca học','Công việc IT','Sở thích'];
-      let html = '<table><thead><tr>' + cols.map(c=>`<th>${c}</th>`).join('') + '</tr></thead><tbody>';
-      for(const r of rows){
-        html += '<tr>' + cols.map(c=>`<td>${(r[c]??'')}</td>`).join('') + '</tr>';
-      }
-      html += '</tbody></table>';
-      box.innerHTML = html;
+        const base = (curPage - 1) * pageSz; // dùng để tính STT liên tục
+
+        // Cột hiển thị (thêm '#' ở đầu)
+        const cols = ['#','Timestamp','Username','Mã SV','Tên','Lớp','GPA','Ca học','Công việc IT','Sở thích'];
+
+        let html = '<table><thead><tr>' + cols.map(c=>`<th>${c}</th>`).join('') + '</tr></thead><tbody>';
+
+        for(let i=0;i<rows.length;i++){
+        const r = rows[i];
+        html += '<tr>';
+        // STT
+        html += `<td>${base + i + 1}</td>`;
+        // Các cột còn lại
+        html += `<td>${r['Timestamp']??''}</td>`;
+        html += `<td>${r['Username']??''}</td>`;
+        html += `<td>${r['Mã SV']??''}</td>`;
+        html += `<td>${r['Tên']??''}</td>`;
+        html += `<td>${r['Lớp']??''}</td>`;
+        html += `<td>${r['GPA']??''}</td>`;
+        html += `<td>${r['Ca học']??''}</td>`;
+        html += `<td>${r['Công việc IT']??''}</td>`;
+        html += `<td>${r['Sở thích']??''}</td>`;
+        html += '</tr>';
+        }
+        html += '</tbody></table>';
+
+        // Thanh phân trang đơn giản
+        html += `
+        <div style="display:flex;align-items:center;gap:8px;justify-content:flex-end;margin-top:10px">
+            <span class="muted">Trang ${curPage}/${totalPages} • Tổng ${total}</span>
+            <button class="btn" ${curPage<=1?'disabled':''}
+            onclick="refreshStudents(${curPage-1}, ${pageSz})">« Trước</button>
+            <button class="btn" ${curPage>=totalPages?'disabled':''}
+            onclick="refreshStudents(${curPage+1}, ${pageSz})">Sau »</button>
+        </div>
+        `;
+
+        box.innerHTML = html;
     }
-    function stuPrev(){ if(stuPage > 1){ stuPage--; refreshStudents(); } }
-    function stuNext(){ if(stuPage < stuTotalPages){ stuPage++; refreshStudents(); } }
-    function stuChangePageSize(v){ stuPageSize = parseInt(v)||25; stuPage = 1; refreshStudents(); }
 
     // ===== Grouping =====
     async function runGrouping(){
       ensureAuth();
+      const dataset = dsSel.value;
       const btn = document.getElementById('btnRun');
       const msg = document.getElementById('runMsg');
-      msg.className='msg muted'; msg.textContent='';
-      btn.disabled = true;
+      msg.className='msg muted'; msg.textContent=''; btn.disabled = true;
 
       const groupSize = document.getElementById('groupSize').value.trim();
       const groupsPerCa = document.getElementById('groupsPerCa').value.trim();
 
-      if(groupSize && parseInt(groupSize) < 2){
-        msg.className='msg err'; msg.textContent = 'Số người mỗi nhóm phải >= 2.';
-        btn.disabled = false; return;
-      }
-
       const params = new URLSearchParams();
+      params.set('dataset', dataset);
       if(groupSize) params.set('group_size', groupSize);
       if(!groupSize && groupsPerCa) params.set('groups_per_ca', groupsPerCa);
 
-      const resp = await fetch('/api/admin/group/run' + (params.toString()?`?${params.toString()}`:''), {
-        method:'POST', headers: { ...authHeader() }
-      });
+      const resp = await fetch('/api/admin/group/run?' + params.toString(), { method:'POST', headers: { ...authHeader() } });
       const data = await resp.json().catch(()=>null);
-
-      if(!resp.ok || !data?.ok){
-        msg.className='msg err'; msg.textContent = data?.message || 'Chia nhóm thất bại.';
-      }else{
-        msg.className='msg ok'; msg.textContent = 'Đã chia nhóm. Mở tab "Kết quả" để xem.';
-        memPage = 1; // về trang đầu
-      }
+      if(!resp.ok || !data?.ok){ msg.className='msg err'; msg.textContent = data?.message || 'Chia nhóm thất bại.'; }
+      else { msg.className='msg ok'; msg.textContent = 'Đã chia nhóm (lưu theo dataset đã chọn). Vào tab "Kết quả" để xem.'; }
       btn.disabled = false;
     }
 
-    // ===== Result =====
-    async function refreshResult(){
+    // ===== Result (paging) =====
+    async function refreshResult(page=1){
       ensureAuth();
+      const dataset = dsSel.value;
       const box = document.getElementById('membersTable');
-      box.innerHTML = 'Đang tải...';
+      const pager = document.getElementById('resultPager');
+      box.innerHTML = 'Đang tải...'; pager.innerHTML='';
 
-      const params = new URLSearchParams({ page: memPage, page_size: memPageSize });
-      const ca = document.getElementById('memFilterCa').value || '';
-      const nhom = document.getElementById('memFilterNhom').value || '';
-      if(ca) params.set('ca', ca);
-      if(nhom) params.set('nhom', nhom);
-
-      const resp = await fetch('/api/admin/group/result?' + params.toString(), { headers: authHeader() });
+      const resp = await fetch(`/api/admin/group/result?dataset=${dataset}&page=${page}&page_size=25`, { headers: authHeader() });
       const data = await resp.json().catch(()=>null);
 
       if(!resp.ok || !data?.ok){
         box.innerHTML = '<span class="muted">Chưa có kết quả. Hãy vào tab "Chia nhóm" và chạy chia nhóm.</span>';
-        document.getElementById('memPager').textContent = 'Trang 1/1';
-        memTotalPages = 1; memPage = 1;
         return;
       }
-
       const rows = data.rows || [];
-      memTotalPages = data.total_pages || 1;
-      memPage = data.page || 1;
-      document.getElementById('memPager').textContent = `Trang ${memPage}/${memTotalPages} (${data.total||0} dòng)`;
-
-      renderMembers(rows);
-    }
-
-    function renderMembers(rows){
-      if(!rows?.length){ document.getElementById('membersTable').innerHTML = '<span class="muted">Không có dữ liệu.</span>'; return; }
       const cols = ['Mã SV','Tên','Lớp','Ca','GPA','Nhóm','GPA TB Nhóm'];
       let html = '<table><thead><tr>' + cols.map(c=>`<th>${c}</th>`).join('') + '</tr></thead><tbody>';
-      for(const r of rows){
-        html += '<tr>' + cols.map(c=>`<td>${(r[c]??'')}</td>`).join('') + '</tr>';
-      }
+      for(const r of rows){ html += '<tr>' + cols.map(c=>`<td>${(r[c]??'')}</td>`).join('') + '</tr>'; }
       html += '</tbody></table>';
-      document.getElementById('membersTable').innerHTML = html;
+      box.innerHTML = html;
+
+      pager.innerHTML = pageButtons(data.page, data.total_pages, p=>refreshResult(p));
     }
 
-    // >>> Các HÀM PHÂN TRANG BỊ THIẾU – đã bổ sung <<<
-    function memPrev(){ if(memPage > 1){ memPage--; refreshResult(); } }
-    function memNext(){ if(memPage < memTotalPages){ memPage++; refreshResult(); } }
-    function memChangePageSize(v){ memPageSize = parseInt(v)||25; memPage = 1; refreshResult(); }
+    // pager helper
+    function pageButtons(page, total, onClick){
+      const prev = Math.max(1, page-1), next = Math.min(total, page+1);
+      return `<div>Trang ${page}/${total}</div>
+              <div class="flex">
+                <button class="btn" ${page<=1?'disabled':''} onclick="(${onClick})(1)">«</button>
+                <button class="btn" ${page<=1?'disabled':''} onclick="(${onClick})(${prev})">‹</button>
+                <button class="btn" ${page>=total?'disabled':''} onclick="(${onClick})(${next})">›</button>
+                <button class="btn" ${page>=total?'disabled':''} onclick="(${onClick})(${total})">»</button>
+              </div>`;
+    }
 
     // init
     ensureAuth();
