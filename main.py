@@ -19,6 +19,9 @@ from pydantic import BaseModel
 import pandas as pd
 import requests
 
+# ====== THUẬT TOÁN & CLEANING (đã tách) ======
+from grouping import clean_dataframe, chia_nhom_tuong_dong, gpa_tb_nhom
+
 # ================== CẤU HÌNH ==================
 BASE_URL = 'https://sinhvien1.tlu.edu.vn/education'
 CLIENT_ID = 'education_client'
@@ -252,6 +255,7 @@ def _read_result_csv(dataset: str) -> List[Dict[str, Any]]:
             out.append(rr)
     return out
 
+# ====== Export Excel helper ======
 def _export_result_xlsx(dataset: str, rows: List[Dict[str, Any]], out_path: str, sheet_name: str = "Groups"):
     """
     Ghi 'rows' (kết quả chia nhóm) ra file Excel .xlsx tại out_path.
@@ -260,10 +264,8 @@ def _export_result_xlsx(dataset: str, rows: List[Dict[str, Any]], out_path: str,
     if not rows:
         raise ValueError("No rows to export")
 
-    # Tạo DataFrame với thứ tự cột đẹp
     df = pd.DataFrame(rows, columns=RESULT_HEADERS)
 
-    # Ghi Excel bằng openpyxl
     with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name=sheet_name)
 
@@ -271,7 +273,6 @@ def _export_result_xlsx(dataset: str, rows: List[Dict[str, Any]], out_path: str,
         try:
             ws = writer.book[sheet_name]
             for col_idx, col_name in enumerate(df.columns, start=1):
-                # chiều rộng tối thiểu 10, tối đa 50
                 max_len = max(
                     len(str(col_name)),
                     *(len(str(v)) for v in df[col_name].astype(str).values)
@@ -279,9 +280,7 @@ def _export_result_xlsx(dataset: str, rows: List[Dict[str, Any]], out_path: str,
                 best = max(10, min(50, max_len + 2))
                 ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = best
         except Exception:
-            # Không critical; bỏ qua nếu không set được width
             pass
-
 
 # ================== SCHEMAS ==================
 class SaveGPAIn(BaseModel):
@@ -299,7 +298,7 @@ class AdminLoginIn(BaseModel):
 # ================== PAGES ==================
 app = FastAPI(title="Lưu GPA (FastAPI)",
               description="Lưu theo dataset (64HTTT1/64HTTT2), chia nhóm và phân trang.",
-              version="1.3.0")
+              version="1.4.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -400,159 +399,7 @@ def require_admin(token: Optional[str]) -> Optional[JSONResponse]:
         return JSONResponse(status_code=401, content={'message':'Unauthorized'})
     return None
 
-# ================== CLEAN & GROUPING UTILS ==================
-CANON_COLS = ['Mã SV','Tên','Lớp','GPA','Ca học','Công việc IT','Sở thích']
-RENAME_MAP = {
-    'Mã SV': 'Mã SV','Ma SV':'Mã SV','MaSV':'Mã SV','MãSV':'Mã SV',
-    'Tên':'Tên','Ten':'Tên','Họ tên':'Tên','Ho ten':'Tên','Ho_ten':'Tên',
-    'Lớp':'Lớp','Lop':'Lớp','Lớp ':'Lớp',
-    'GPA':'GPA','Điểm GPA':'GPA',
-    'Ca học':'Ca học','Ca':'Ca học','Ca ':'Ca học','Ca học ':'Ca học',
-    'Công việc IT':'Công việc IT','Cong viec IT':'Công việc IT','Cong viec':'Công việc IT',
-    'Sở thích':'Sở thích','So thich':'Sở thích','So_thich':'Sở thích'
-}
-
-def _to_float_gpa(x):
-    if pd.isna(x): return None
-    if isinstance(x, (int, float)): return float(x)
-    s = str(x).strip()
-    if not s: return None
-    s = s.replace(',', '.'); s = re.sub(r'[^0-9\.\-]+','', s)
-    try: return float(s)
-    except: return None
-
-def _clean_text(x):
-    if pd.isna(x): return None
-    s = str(x).strip()
-    return s if s else None
-
-def _split_hobbies(x: str) -> List[str]:
-    if not isinstance(x, str): return []
-    tmp = x.replace('|', ',').replace(';', ',')
-    parts = [p.strip() for p in tmp.split(',')]
-    return [p for p in parts if p]
-
-def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    cols = {c: RENAME_MAP.get(c, c) for c in df.columns}
-    df = df.rename(columns=cols)
-    for c in CANON_COLS:
-        if c not in df.columns: df[c] = None
-    df = df[CANON_COLS].copy()
-
-    df['Mã SV'] = df['Mã SV'].apply(_clean_text)
-    df['Tên'] = df['Tên'].apply(_clean_text)
-    df['Lớp'] = df['Lớp'].apply(_clean_text)
-    df['Ca học'] = df['Ca học'].apply(_clean_text)
-    df['Công việc IT'] = df['Công việc IT'].apply(_clean_text)
-    df['Sở thích'] = df['Sở thích'].apply(_clean_text)
-    df['GPA'] = df['GPA'].apply(_to_float_gpa)
-
-    df = df[~df['Ca học'].isna() & (df['Ca học'].str.strip() != '')]
-    df = df[~df['Tên'].isna() & (df['Tên'].str.strip() != '')]
-    df = df.reset_index(drop=True)
-    return df
-
-def tinh_diem_tuong_dong(sv1, sv2):
-    g1 = sv1.get('GPA'); g2 = sv2.get('GPA')
-    gpa_sv1 = (g1/4.0) if g1 is not None else 0.0
-    gpa_sv2 = (g2/4.0) if g2 is not None else 0.0
-    diem_gpa = 1.0 - abs(gpa_sv1 - gpa_sv2)
-
-    cong_viec_chung = 0
-    if sv1.get('Công việc IT') and sv2.get('Công việc IT') and sv1['Công việc IT'] == sv2['Công việc IT']:
-        cong_viec_chung = 1
-
-    so_thich_chung = 0
-    if sv1.get('Sở thích') and sv2.get('Sở thích'):
-        so_thich1 = set(map(str.lower, _split_hobbies(sv1['Sở thích'])))
-        so_thich2 = set(map(str.lower, _split_hobbies(sv2['Sở thích'])))
-        so_thich_chung = len(so_thich1 & so_thich2)
-
-    w_gpa, w_cong_viec, w_so_thich = 0.4, 0.3, 0.3
-    return w_gpa*diem_gpa + w_cong_viec*cong_viec_chung + w_so_thich*so_thich_chung
-
-def gpa_tb_nhom(nhom):
-    gpas = [sv.get('GPA') for sv in nhom if sv.get('GPA') is not None]
-    return (sum(gpas)/len(gpas)) if gpas else 0.0
-
-def tinh_diem_trung_binh_nhom(nhom):
-    if not nhom or len(nhom) < 2: return 0.0
-    tong = 0.0; so_cap = 0
-    for sv1, sv2 in itertools.combinations(nhom, 2):
-        tong += tinh_diem_tuong_dong(sv1, sv2); so_cap += 1
-    return (tong/so_cap) if so_cap>0 else 0.0
-
-def chia_nhom_tuong_dong(dssv, so_nhom_mong_muon_moi_ca=None, so_luong_moi_nhom=None):
-    from collections import defaultdict
-    sinh_vien_theo_ca = defaultdict(list)
-    for sv in dssv:
-        sinh_vien_theo_ca[sv['Ca học']].append(sv)
-
-    ket_qua = {}
-    for ca, lst in sinh_vien_theo_ca.items():
-        if not lst: continue
-        lst.sort(key=lambda x: x['GPA'] if x['GPA'] is not None else 0.0, reverse=True)
-
-        if so_luong_moi_nhom and so_luong_moi_nhom > 0:
-            num_groups = max(1, math.ceil(len(lst) / so_luong_moi_nhom))
-        else:
-            base = so_nhom_mong_muon_moi_ca if so_nhom_mong_muon_moi_ca and so_nhom_mong_muon_moi_ca>0 else 3
-            num_groups = min(len(lst), base) if len(lst) >= base else max(1, len(lst)//2 or 1)
-
-        groups = [[] for _ in range(num_groups)]
-        # snake distribution
-        for i, sv in enumerate(lst):
-            idx = i % num_groups
-            if (i // num_groups) % 2 == 1: idx = num_groups-1-idx
-            groups[idx].append(sv)
-
-        # tối ưu tương đồng
-        for _ in range(60):
-            changed = False
-            for i1, i2 in itertools.combinations(range(num_groups), 2):
-                n1, n2 = groups[i1], groups[i2]
-                for a, sv1 in enumerate(n1):
-                    for b, sv2 in enumerate(n2):
-                        before = tinh_diem_trung_binh_nhom(n1) + tinh_diem_trung_binh_nhom(n2)
-                        n1m = n1[:a]+n1[a+1:]+[sv2]; n2m = n2[:b]+n2[b+1:]+[sv1]
-                        after = tinh_diem_trung_binh_nhom(n1m) + tinh_diem_trung_binh_nhom(n2m)
-                        if after > before:
-                            d_tr = gpa_tb_nhom(n1) - gpa_tb_nhom(n2)
-                            d_sa = gpa_tb_nhom(n1m) - gpa_tb_nhom(n2m)
-                            if abs(d_sa - d_tr) < 0.25:
-                                groups[i1], groups[i2] = n1m, n2m
-                                changed = True
-                                break
-                    if changed: break
-                if changed: break
-            if not changed: break
-
-        # cân bằng GPA TB theo toàn ca
-        gpas_ca = [sv.get('GPA') for sv in lst if sv.get('GPA') is not None]
-        gpa_toan_ca = (sum(gpas_ca)/len(gpas_ca)) if gpas_ca else 0.0
-        eps = 1e-9
-        for _ in range(120):
-            improved = False
-            for i1, i2 in itertools.combinations(range(num_groups), 2):
-                n1, n2 = groups[i1], groups[i2]
-                best_delta = 0.0; best_pair = None
-                var_before = ((gpa_tb_nhom(n1)-gpa_toan_ca)**2 + (gpa_tb_nhom(n2)-gpa_toan_ca)**2)
-                for a, sv1 in enumerate(n1):
-                    for b, sv2 in enumerate(n2):
-                        n1m = n1[:a]+n1[a+1:]+[sv2]; n2m = n2[:b]+n2[b+1:]+[sv1]
-                        var_after = ((gpa_tb_nhom(n1m)-gpa_toan_ca)**2 + (gpa_tb_nhom(n2m)-gpa_toan_ca)**2)
-                        delta = var_before - var_after
-                        if delta > best_delta + eps:
-                            best_delta = delta; best_pair = (a, b)
-                if best_pair is not None:
-                    a, b = best_pair
-                    n1[a], n2[b] = n2[b], n1[a]
-                    improved = True
-            if not improved: break
-
-        ket_qua[ca] = groups
-    return ket_qua
-
+# ================== GROUPING WRAPPER ==================
 def _run_grouping_for_dataset(dataset: str,
                               group_size: Optional[int],
                               groups_per_ca: Optional[int]) -> Dict[str, Any]:
@@ -684,6 +531,7 @@ def api_group_result(
         'file': os.path.basename(_dataset_paths(dataset)[1])
     }
 
+# ====== DOWNLOAD EXCEL ======
 @app.get("/api/admin/group/result.xlsx")
 def api_group_result_xlsx(
     x_admin_token: Optional[str] = Header(None),
@@ -704,7 +552,7 @@ def api_group_result_xlsx(
     if not rows:
         return JSONResponse(status_code=404, content={'ok': False, 'message': 'Chưa có kết quả để xuất. Hãy chạy chia nhóm trước.'})
 
-    # Áp filter giống JSON API
+    # Lọc
     if ca:
         rows = [r for r in rows if (str(r.get('Ca') or '').lower() == ca.lower())]
     if nhom is not None:
@@ -713,7 +561,7 @@ def api_group_result_xlsx(
     if not rows:
         return JSONResponse(status_code=404, content={'ok': False, 'message': 'Không có dòng nào sau khi lọc.'})
 
-    # Tạo file .xlsx trong thư mục data
+    # Tạo file .xlsx
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"ket_qua_{dataset}_{ts}.xlsx"
     out_path = os.path.join(DATA_DIR, filename)
@@ -723,13 +571,11 @@ def api_group_result_xlsx(
     except Exception as e:
         return JSONResponse(status_code=500, content={'ok': False, 'message': 'Xuất Excel thất bại', 'error': str(e)})
 
-    # Trả file
     return FileResponse(
         out_path,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         filename=filename
     )
-
 
 # ================== MAIN ==================
 if __name__ == "__main__":
