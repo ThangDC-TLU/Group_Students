@@ -252,6 +252,37 @@ def _read_result_csv(dataset: str) -> List[Dict[str, Any]]:
             out.append(rr)
     return out
 
+def _export_result_xlsx(dataset: str, rows: List[Dict[str, Any]], out_path: str, sheet_name: str = "Groups"):
+    """
+    Ghi 'rows' (kết quả chia nhóm) ra file Excel .xlsx tại out_path.
+    Tự căn độ rộng cột cơ bản.
+    """
+    if not rows:
+        raise ValueError("No rows to export")
+
+    # Tạo DataFrame với thứ tự cột đẹp
+    df = pd.DataFrame(rows, columns=RESULT_HEADERS)
+
+    # Ghi Excel bằng openpyxl
+    with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+
+        # Auto width basic
+        try:
+            ws = writer.book[sheet_name]
+            for col_idx, col_name in enumerate(df.columns, start=1):
+                # chiều rộng tối thiểu 10, tối đa 50
+                max_len = max(
+                    len(str(col_name)),
+                    *(len(str(v)) for v in df[col_name].astype(str).values)
+                )
+                best = max(10, min(50, max_len + 2))
+                ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = best
+        except Exception:
+            # Không critical; bỏ qua nếu không set được width
+            pass
+
+
 # ================== SCHEMAS ==================
 class SaveGPAIn(BaseModel):
     username: str
@@ -652,6 +683,53 @@ def api_group_result(
         'total': total, 'total_pages': total_pages,
         'file': os.path.basename(_dataset_paths(dataset)[1])
     }
+
+@app.get("/api/admin/group/result.xlsx")
+def api_group_result_xlsx(
+    x_admin_token: Optional[str] = Header(None),
+    dataset: str = Query("data", pattern="^(data|data_h2)$"),
+    ca: Optional[str] = Query(None, description="Lọc theo Ca"),
+    nhom: Optional[int] = Query(None, description="Lọc theo số Nhóm")
+):
+    # Auth
+    err = require_admin(x_admin_token)
+    if err:
+        return err
+
+    # Lấy dữ liệu kết quả
+    rows = _read_result_csv(dataset)
+    if not rows and dataset in LAST_GROUP_RESULT and LAST_GROUP_RESULT[dataset].get('rows'):
+        rows = LAST_GROUP_RESULT[dataset]['rows']
+
+    if not rows:
+        return JSONResponse(status_code=404, content={'ok': False, 'message': 'Chưa có kết quả để xuất. Hãy chạy chia nhóm trước.'})
+
+    # Áp filter giống JSON API
+    if ca:
+        rows = [r for r in rows if (str(r.get('Ca') or '').lower() == ca.lower())]
+    if nhom is not None:
+        rows = [r for r in rows if str(r.get('Nhóm')) == str(nhom)]
+
+    if not rows:
+        return JSONResponse(status_code=404, content={'ok': False, 'message': 'Không có dòng nào sau khi lọc.'})
+
+    # Tạo file .xlsx trong thư mục data
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"ket_qua_{dataset}_{ts}.xlsx"
+    out_path = os.path.join(DATA_DIR, filename)
+
+    try:
+        _export_result_xlsx(dataset, rows, out_path, sheet_name="Groups")
+    except Exception as e:
+        return JSONResponse(status_code=500, content={'ok': False, 'message': 'Xuất Excel thất bại', 'error': str(e)})
+
+    # Trả file
+    return FileResponse(
+        out_path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=filename
+    )
+
 
 # ================== MAIN ==================
 if __name__ == "__main__":

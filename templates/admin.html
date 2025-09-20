@@ -40,6 +40,7 @@
     .ok{color:var(--ok)} .err{color:var(--err)}
     .hint{font-size:12px;color:var(--muted);margin-top:4px}
     .flex{display:flex;gap:8px;align-items:center}
+    .right{justify-content:flex-end}
   </style>
 </head>
 <body>
@@ -96,10 +97,18 @@
 
     <!-- RESULT -->
     <section id="panel-result" class="panel">
-      <div class="card flex" style="justify-content:space-between;">
+      <div class="card" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between">
         <div class="muted">Thành viên từng nhóm (đọc từ file kết quả của dataset đã chọn)</div>
-        <div><button class="btn" onclick="refreshResult()">Tải lại</button></div>
+        <div class="flex" style="gap:8px;flex-wrap:wrap">
+          <input id="filterCa" placeholder="Lọc Ca (vd: Ca1)" style="width:160px" />
+          <input id="filterNhom" type="number" min="1" placeholder="Lọc Nhóm (vd: 3)" style="width:160px" />
+          <button class="btn" onclick="applyFilters()">Áp dụng lọc</button>
+          <button class="btn" onclick="clearFilters()">Xoá lọc</button>
+          <button class="btn primary" id="btnXlsx" onclick="downloadXlsx()">Tải Excel</button>
+          <button class="btn" onclick="refreshResult()">Tải lại</button>
+        </div>
       </div>
+
       <div id="membersTable" class="card" style="overflow:auto"></div>
       <div id="resultPager" class="card flex" style="justify-content:space-between;margin-top:8px"></div>
     </section>
@@ -119,8 +128,8 @@
     dsSel.addEventListener('change', () => {
       localStorage.setItem('DATASET', dsSel.value);
       document.getElementById('fileIndicator').textContent = dsSel.value === 'data' ? 'data.csv' : 'data_h2.csv';
-      refreshStudents();
-      refreshResult();
+      refreshStudents(1);
+      refreshResult(1);
     });
     document.getElementById('fileIndicator').textContent = dsSel.value === 'data' ? 'data.csv' : 'data_h2.csv';
 
@@ -142,41 +151,36 @@
     });
 
     // ===== Students (paging) =====
-  // Gọi như cũ: refreshStudents(); hoặc refreshStudents(1)
     async function refreshStudents(page=1, pageSize=25, q=''){
-        ensureAuth();
-        const box = document.getElementById('studentsTable');
-        box.innerHTML = 'Đang tải...';
+      ensureAuth();
+      const dataset = dsSel.value;                 // <-- LẤY DATASET
+      const box = document.getElementById('studentsTable');
+      box.innerHTML = 'Đang tải...';
 
-        const params = new URLSearchParams({ page, page_size: pageSize });
-        if (q) params.set('q', q);
+      const params = new URLSearchParams({ page, page_size: pageSize, dataset }); // <-- TRUYỀN DATASET
+      if (q) params.set('q', q);
 
-        const resp = await fetch('/api/admin/students?' + params.toString(), { headers: authHeader() });
-        if(!resp.ok){ box.innerHTML = '<span class="err">Không tải được dữ liệu.</span>'; return; }
-        const data = await resp.json();
-        if(!data.ok){ box.innerHTML = '<span class="err">Không có dữ liệu.</span>'; return; }
+      const resp = await fetch('/api/admin/students?' + params.toString(), { headers: authHeader() });
+      if(!resp.ok){ box.innerHTML = '<span class="err">Không tải được dữ liệu.</span>'; return; }
+      const data = await resp.json();
+      if(!data.ok){ box.innerHTML = '<span class="err">Không có dữ liệu.</span>'; return; }
 
-        const rows = data.rows || [];
-        if(rows.length===0){ box.innerHTML = '<span class="muted">Chưa có bản ghi.</span>'; return; }
+      const rows = data.rows || [];
+      if(rows.length===0){ box.innerHTML = '<span class="muted">Chưa có bản ghi.</span>'; return; }
 
-        const curPage = data.page || 1;
-        const pageSz  = data.page_size || rows.length;
-        const total   = data.total || rows.length;
-        const totalPages = data.total_pages || 1;
+      const curPage = data.page || 1;
+      const pageSz  = data.page_size || rows.length;
+      const total   = data.total || rows.length;
+      const totalPages = data.total_pages || 1;
 
-        const base = (curPage - 1) * pageSz; // dùng để tính STT liên tục
+      const base = (curPage - 1) * pageSz; // STT liên tục
+      const cols = ['#','Timestamp','Username','Mã SV','Tên','Lớp','GPA','Ca học','Công việc IT','Sở thích'];
 
-        // Cột hiển thị (thêm '#' ở đầu)
-        const cols = ['#','Timestamp','Username','Mã SV','Tên','Lớp','GPA','Ca học','Công việc IT','Sở thích'];
-
-        let html = '<table><thead><tr>' + cols.map(c=>`<th>${c}</th>`).join('') + '</tr></thead><tbody>';
-
-        for(let i=0;i<rows.length;i++){
+      let html = '<table><thead><tr>' + cols.map(c=>`<th>${c}</th>`).join('') + '</tr></thead><tbody>';
+      for(let i=0;i<rows.length;i++){
         const r = rows[i];
         html += '<tr>';
-        // STT
         html += `<td>${base + i + 1}</td>`;
-        // Các cột còn lại
         html += `<td>${r['Timestamp']??''}</td>`;
         html += `<td>${r['Username']??''}</td>`;
         html += `<td>${r['Mã SV']??''}</td>`;
@@ -187,21 +191,18 @@
         html += `<td>${r['Công việc IT']??''}</td>`;
         html += `<td>${r['Sở thích']??''}</td>`;
         html += '</tr>';
-        }
-        html += '</tbody></table>';
+      }
+      html += '</tbody></table>';
 
-        // Thanh phân trang đơn giản
-        html += `
+      html += `
         <div style="display:flex;align-items:center;gap:8px;justify-content:flex-end;margin-top:10px">
-            <span class="muted">Trang ${curPage}/${totalPages} • Tổng ${total}</span>
-            <button class="btn" ${curPage<=1?'disabled':''}
+          <span class="muted">Trang ${curPage}/${totalPages} • Tổng ${total}</span>
+          <button class="btn" ${curPage<=1?'disabled':''}
             onclick="refreshStudents(${curPage-1}, ${pageSz})">« Trước</button>
-            <button class="btn" ${curPage>=totalPages?'disabled':''}
+          <button class="btn" ${curPage>=totalPages?'disabled':''}
             onclick="refreshStudents(${curPage+1}, ${pageSz})">Sau »</button>
-        </div>
-        `;
-
-        box.innerHTML = html;
+        </div>`;
+      box.innerHTML = html;
     }
 
     // ===== Grouping =====
@@ -223,11 +224,29 @@
       const resp = await fetch('/api/admin/group/run?' + params.toString(), { method:'POST', headers: { ...authHeader() } });
       const data = await resp.json().catch(()=>null);
       if(!resp.ok || !data?.ok){ msg.className='msg err'; msg.textContent = data?.message || 'Chia nhóm thất bại.'; }
-      else { msg.className='msg ok'; msg.textContent = 'Đã chia nhóm (lưu theo dataset đã chọn). Vào tab "Kết quả" để xem.'; }
+      else { msg.className='msg ok'; msg.textContent = 'Đã chia nhóm (lưu theo dataset đã chọn). Vào tab "Kết quả" để xem.'; refreshResult(1); }
       btn.disabled = false;
     }
 
-    // ===== Result (paging) =====
+    // ===== Result (paging + filters + download) =====
+    let _resultFilters = { ca: '', nhom: '' };
+
+    function getResultFilters(){
+      const ca = (document.getElementById('filterCa').value || '').trim();
+      const nhom = (document.getElementById('filterNhom').value || '').trim();
+      return { ca, nhom };
+    }
+    function applyFilters(){
+      _resultFilters = getResultFilters();
+      refreshResult(1);
+    }
+    function clearFilters(){
+      document.getElementById('filterCa').value = '';
+      document.getElementById('filterNhom').value = '';
+      _resultFilters = { ca:'', nhom:'' };
+      refreshResult(1);
+    }
+
     async function refreshResult(page=1){
       ensureAuth();
       const dataset = dsSel.value;
@@ -235,7 +254,11 @@
       const pager = document.getElementById('resultPager');
       box.innerHTML = 'Đang tải...'; pager.innerHTML='';
 
-      const resp = await fetch(`/api/admin/group/result?dataset=${dataset}&page=${page}&page_size=25`, { headers: authHeader() });
+      const params = new URLSearchParams({ dataset, page, page_size: 25 });
+      if(_resultFilters.ca) params.set('ca', _resultFilters.ca);
+      if(_resultFilters.nhom) params.set('nhom', _resultFilters.nhom);
+
+      const resp = await fetch(`/api/admin/group/result?${params.toString()}`, { headers: authHeader() });
       const data = await resp.json().catch(()=>null);
 
       if(!resp.ok || !data?.ok){
@@ -252,16 +275,66 @@
       pager.innerHTML = pageButtons(data.page, data.total_pages, p=>refreshResult(p));
     }
 
-    // pager helper
     function pageButtons(page, total, onClick){
       const prev = Math.max(1, page-1), next = Math.min(total, page+1);
       return `<div>Trang ${page}/${total}</div>
-              <div class="flex">
+              <div class="flex right">
                 <button class="btn" ${page<=1?'disabled':''} onclick="(${onClick})(1)">«</button>
                 <button class="btn" ${page<=1?'disabled':''} onclick="(${onClick})(${prev})">‹</button>
                 <button class="btn" ${page>=total?'disabled':''} onclick="(${onClick})(${next})">›</button>
                 <button class="btn" ${page>=total?'disabled':''} onclick="(${onClick})(${total})">»</button>
               </div>`;
+    }
+
+    // === Download XLSX ===
+    function _filenameFromDisposition(dispo, fallback){
+      try{
+        if(!dispo) return fallback;
+        const m = /filename\*=UTF-8''([^;]+)|filename="([^"]+)"/i.exec(dispo);
+        if(m){
+          const name = decodeURIComponent(m[1] || m[2]);
+          return name || fallback;
+        }
+      }catch(e){}
+      return fallback;
+    }
+
+    async function downloadXlsx(){
+      ensureAuth();
+      const dataset = dsSel.value;
+      const btn = document.getElementById('btnXlsx');
+      const old = btn.textContent;
+      btn.textContent = 'Đang tạo...'; btn.disabled = true;
+
+      const params = new URLSearchParams({ dataset });
+      const { ca, nhom } = getResultFilters();
+      if(ca) params.set('ca', ca);
+      if(nhom) params.set('nhom', nhom);
+
+      try{
+        const resp = await fetch(`/api/admin/group/result.xlsx?${params.toString()}`, {
+          headers: { ...authHeader() }
+        });
+        if(!resp.ok){
+          const errTxt = await resp.text().catch(()=> '');
+          alert('Xuất Excel thất bại: ' + (errTxt || resp.status));
+          return;
+        }
+        const blob = await resp.blob();
+        const dispo = resp.headers.get('content-disposition');
+        const fallback = `ket_qua_${dataset}_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'')}.xlsx`;
+        const filename = _filenameFromDisposition(dispo, fallback);
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click();
+        setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 100);
+      }catch(e){
+        alert('Lỗi tải file: ' + e.message);
+      }finally{
+        btn.textContent = old; btn.disabled = false;
+      }
     }
 
     // init
