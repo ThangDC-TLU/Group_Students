@@ -51,6 +51,23 @@ os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
 os.makedirs(STATIC_DIR, exist_ok=True)
 
+# ====== THƯ MỤC BACKUP (TRASH) CHO CLEAR DATA ======
+TRASH_DIR = os.path.join(DATA_DIR, 'trash')
+os.makedirs(TRASH_DIR, exist_ok=True)
+
+def _trash_file(path: str) -> Optional[str]:
+    """
+    Di chuyển file sang thư mục TRASH_DIR kèm timestamp để backup an toàn.
+    Trả về đường dẫn mới nếu di chuyển thành công, None nếu không tồn tại/empty.
+    """
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        return None
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    new_name = f"{ts}_{os.path.basename(path)}"
+    dst = os.path.join(TRASH_DIR, new_name)
+    os.replace(path, dst)  # atomic move
+    return dst
+
 ADMIN_TOKEN = os.getenv('ADMIN_TOKEN', 'change-me-very-strong')
 ADMIN_USER = os.getenv('ADMIN_USER', 'admin')
 ADMIN_PASS = os.getenv('ADMIN_PASS', 'admin123')
@@ -298,7 +315,7 @@ class AdminLoginIn(BaseModel):
 # ================== PAGES ==================
 app = FastAPI(title="Lưu GPA (FastAPI)",
               description="Lưu theo dataset (64HTTT1/64HTTT2), chia nhóm và phân trang.",
-              version="1.4.0")
+              version="1.5.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -576,6 +593,54 @@ def api_group_result_xlsx(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         filename=filename
     )
+
+# ====== CLEAR DATA (backup vào data/trash) ======
+@app.post("/api/admin/clear")
+def api_admin_clear(
+    x_admin_token: Optional[str] = Header(None),
+    dataset: str = Query("data", pattern="^(data|data_h2)$"),
+    target: str = Query("all", pattern="^(students|result|all)$", description="Xoá file dữ liệu nào"),
+    backup: bool = Query(True, description="True: backup sang data/trash trước khi xoá")
+):
+    """
+    Xoá dữ liệu theo dataset:
+    - target=students: xoá file CSV dữ liệu sinh viên (data.csv|data_h2.csv)
+    - target=result  : xoá file CSV kết quả chia nhóm (chianhom*.csv)
+    - target=all     : xoá cả hai
+    - backup=True    : di chuyển sang data/trash trước khi xoá
+    """
+    err = require_admin(x_admin_token)
+    if err: return err
+
+    students_csv, result_csv = _dataset_paths(dataset)
+    acted = []
+
+    def _clear_one(path: str):
+        if not os.path.exists(path) or os.path.getsize(path) == 0:
+            acted.append({'file': os.path.basename(path), 'action': 'skip (not found or empty)'})
+            return
+        if backup:
+            new_path = _trash_file(path)
+            acted.append({
+                'file': os.path.basename(path),
+                'action': 'moved to trash' if new_path else 'skip (not found)',
+                'trash_path': new_path
+            })
+        else:
+            try:
+                os.remove(path)
+                acted.append({'file': os.path.basename(path), 'action': 'deleted'})
+            except Exception as e:
+                acted.append({'file': os.path.basename(path), 'action': f'error: {str(e)}'})
+
+    if target in ('students', 'all'):
+        _clear_one(students_csv)
+    if target in ('result', 'all'):
+        _clear_one(result_csv)
+        # Xoá cache RAM nếu xoá result
+        LAST_GROUP_RESULT.pop(dataset, None)
+
+    return {'ok': True, 'dataset': dataset, 'target': target, 'backup': backup, 'actions': acted}
 
 # ================== MAIN ==================
 if __name__ == "__main__":

@@ -22,6 +22,7 @@
     .bar .title{font-weight:800;font-size:20px}
     .btn{padding:10px 14px;border:1px solid var(--border);border-radius:10px;background:var(--tab);color:var(--text);cursor:pointer}
     .btn.primary{background:var(--primary);color:#fff;border-color:transparent}
+    .btn.danger{background:#ef4444;color:#fff;border-color:transparent}
     .btn:disabled{opacity:.6;cursor:not-allowed}
     .tabs{display:flex;gap:8px;background:var(--tab);padding:6px;border-radius:12px;margin:10px 0 18px;border:1px solid var(--border)}
     .tab-btn{flex:1;padding:10px;border-radius:8px;border:0;background:transparent;color:var(--muted);font-weight:700;cursor:pointer}
@@ -41,6 +42,10 @@
     .hint{font-size:12px;color:var(--muted);margin-top:4px}
     .flex{display:flex;gap:8px;align-items:center}
     .right{justify-content:flex-end}
+    .chip{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;border:1px solid var(--border);background:var(--tab);font-size:12px}
+    .switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer}
+    .switch input{width:auto}
+    code{background:transparent;border:1px dashed var(--border);padding:2px 6px;border-radius:6px}
   </style>
 </head>
 <body>
@@ -53,6 +58,7 @@
           <option value="data">64HTTT1 (data.csv)</option>
           <option value="data_h2">64HTTT2 (data_h2.csv)</option>
         </select>
+        <span class="chip">Nguồn: <code id="fileIndicator">data.csv</code></span>
         <button class="btn" onclick="goHome()">Trang login</button>
         <button class="btn" onclick="logout()">Đăng xuất</button>
       </div>
@@ -62,13 +68,17 @@
       <button id="tab-students" class="tab-btn" role="tab" aria-selected="true" aria-controls="panel-students">Sinh viên</button>
       <button id="tab-group" class="tab-btn" role="tab" aria-selected="false" aria-controls="panel-group">Chia nhóm</button>
       <button id="tab-result" class="tab-btn" role="tab" aria-selected="false" aria-controls="panel-result">Kết quả</button>
+      <button id="tab-maint" class="tab-btn" role="tab" aria-selected="false" aria-controls="panel-maint">Dọn dữ liệu</button>
     </div>
 
     <!-- STUDENTS -->
     <section id="panel-students" class="panel active">
       <div class="card flex" style="justify-content:space-between;">
-        <div class="muted">Nguồn: <code id="fileIndicator">data.csv</code></div>
-        <div><button class="btn" onclick="refreshStudents()">Tải lại</button></div>
+        <div class="muted">Danh sách đã lưu theo dataset.</div>
+        <div class="flex">
+          <button class="btn" onclick="refreshStudents()">Tải lại</button>
+          <button class="btn" onclick="quickClear('students')">Xoá students</button>
+        </div>
       </div>
       <div class="card hint">Dùng Ctrl/Cmd + F để lọc nhanh.</div>
       <div id="studentsTable" class="card" style="margin-top:12px;overflow:auto"></div>
@@ -87,8 +97,9 @@
             <label>Số nhóm mỗi ca (tuỳ chọn)</label>
             <input id="groupsPerCa" type="number" min="1" placeholder="VD: 3" />
           </div>
-          <div class="row">
+          <div class="row flex">
             <button id="btnRun" class="btn primary" onclick="runGrouping()">Chia nhóm</button>
+            <button class="btn" onclick="quickClear('result')">Xoá kết quả</button>
             <span id="runMsg" class="msg muted"></span>
           </div>
         </div>
@@ -108,9 +119,39 @@
           <button class="btn" onclick="refreshResult()">Tải lại</button>
         </div>
       </div>
-
       <div id="membersTable" class="card" style="overflow:auto"></div>
       <div id="resultPager" class="card flex" style="justify-content:space-between;margin-top:8px"></div>
+    </section>
+
+    <!-- MAINTENANCE / CLEAR DATA -->
+    <section id="panel-maint" class="panel">
+      <div class="grid">
+        <div class="card">
+          <h3 style="margin:0 0 10px 0;">Dọn dữ liệu</h3>
+          <div class="row">
+            <label>Mục tiêu xoá</label>
+            <div class="flex" style="flex-wrap:wrap">
+              <label class="chip"><input type="radio" name="target" value="students" /> students</label>
+              <label class="chip"><input type="radio" name="target" value="result" /> result</label>
+              <label class="chip"><input type="radio" name="target" value="all" checked /> all</label>
+            </div>
+            <div class="hint">students: <code>data.csv</code> hoặc <code>data_h2.csv</code> • result: <code>chianhom*.csv</code></div>
+          </div>
+          <div class="row">
+            <label class="switch">
+              <input id="backupToggle" type="checkbox" checked />
+              <span>Sao lưu vào <code>data/trash</code> trước khi xoá</span>
+            </label>
+          </div>
+          <div class="row flex">
+            <button class="btn danger" onclick="clearData()">Xoá ngay</button>
+            <span id="clearMsg" class="msg muted"></span>
+          </div>
+          <div class="row">
+            <div id="clearActions" class="card" style="padding:12px;background:transparent;border-style:dashed"></div>
+          </div>
+        </div>
+      </div>
     </section>
   </div>
 
@@ -127,17 +168,21 @@
     dsSel.value = localStorage.getItem('DATASET') || 'data';
     dsSel.addEventListener('change', () => {
       localStorage.setItem('DATASET', dsSel.value);
-      document.getElementById('fileIndicator').textContent = dsSel.value === 'data' ? 'data.csv' : 'data_h2.csv';
+      updateFileIndicator();
       refreshStudents(1);
       refreshResult(1);
     });
-    document.getElementById('fileIndicator').textContent = dsSel.value === 'data' ? 'data.csv' : 'data_h2.csv';
+    function updateFileIndicator(){
+      document.getElementById('fileIndicator').textContent = dsSel.value === 'data' ? 'data.csv' : 'data_h2.csv';
+    }
+    updateFileIndicator();
 
     // Tabs
     const tabs = [
       {btn:'tab-students', panel:'panel-students'},
       {btn:'tab-group', panel:'panel-group'},
-      {btn:'tab-result', panel:'panel-result'}
+      {btn:'tab-result', panel:'panel-result'},
+      {btn:'tab-maint', panel:'panel-maint'}
     ];
     tabs.forEach(t=>{
       document.getElementById(t.btn).addEventListener('click', ()=>{
@@ -153,11 +198,12 @@
     // ===== Students (paging) =====
     async function refreshStudents(page=1, pageSize=25, q=''){
       ensureAuth();
-      const dataset = dsSel.value;                 // <-- LẤY DATASET
+      const dataset = dsSel.value;
       const box = document.getElementById('studentsTable');
-      box.innerHTML = 'Đang tải...';
+      const pager = document.getElementById('studentsPager');
+      box.innerHTML = 'Đang tải...'; pager.innerHTML = '';
 
-      const params = new URLSearchParams({ page, page_size: pageSize, dataset }); // <-- TRUYỀN DATASET
+      const params = new URLSearchParams({ page, page_size: pageSize, dataset });
       if (q) params.set('q', q);
 
       const resp = await fetch('/api/admin/students?' + params.toString(), { headers: authHeader() });
@@ -172,10 +218,9 @@
       const pageSz  = data.page_size || rows.length;
       const total   = data.total || rows.length;
       const totalPages = data.total_pages || 1;
+      const base = (curPage - 1) * pageSz;
 
-      const base = (curPage - 1) * pageSz; // STT liên tục
       const cols = ['#','Timestamp','Username','Mã SV','Tên','Lớp','GPA','Ca học','Công việc IT','Sở thích'];
-
       let html = '<table><thead><tr>' + cols.map(c=>`<th>${c}</th>`).join('') + '</tr></thead><tbody>';
       for(let i=0;i<rows.length;i++){
         const r = rows[i];
@@ -194,13 +239,15 @@
       }
       html += '</tbody></table>';
 
-      html += `
-        <div style="display:flex;align-items:center;gap:8px;justify-content:flex-end;margin-top:10px">
+      pager.innerHTML = `
+        <div class="flex right" style="width:100%;justify-content:space-between">
           <span class="muted">Trang ${curPage}/${totalPages} • Tổng ${total}</span>
-          <button class="btn" ${curPage<=1?'disabled':''}
-            onclick="refreshStudents(${curPage-1}, ${pageSz})">« Trước</button>
-          <button class="btn" ${curPage>=totalPages?'disabled':''}
-            onclick="refreshStudents(${curPage+1}, ${pageSz})">Sau »</button>
+          <div class="flex">
+            <button class="btn" ${curPage<=1?'disabled':''}
+              onclick="refreshStudents(${curPage-1}, ${pageSz})">« Trước</button>
+            <button class="btn" ${curPage>=totalPages?'disabled':''}
+              onclick="refreshStudents(${curPage+1}, ${pageSz})">Sau »</button>
+          </div>
         </div>`;
       box.innerHTML = html;
     }
@@ -224,7 +271,7 @@
       const resp = await fetch('/api/admin/group/run?' + params.toString(), { method:'POST', headers: { ...authHeader() } });
       const data = await resp.json().catch(()=>null);
       if(!resp.ok || !data?.ok){ msg.className='msg err'; msg.textContent = data?.message || 'Chia nhóm thất bại.'; }
-      else { msg.className='msg ok'; msg.textContent = 'Đã chia nhóm (lưu theo dataset đã chọn). Vào tab "Kết quả" để xem.'; refreshResult(1); }
+      else { msg.className='msg ok'; msg.textContent = 'Đã chia nhóm. Vào tab "Kết quả" để xem.'; refreshResult(1); }
       btn.disabled = false;
     }
 
@@ -312,9 +359,7 @@
       if(nhom) params.set('nhom', nhom);
 
       try{
-        const resp = await fetch(`/api/admin/group/result.xlsx?${params.toString()}`, {
-          headers: { ...authHeader() }
-        });
+        const resp = await fetch(`/api/admin/group/result.xlsx?${params.toString()}`, { headers: { ...authHeader() } });
         if(!resp.ok){
           const errTxt = await resp.text().catch(()=> '');
           alert('Xuất Excel thất bại: ' + (errTxt || resp.status));
@@ -334,6 +379,66 @@
         alert('Lỗi tải file: ' + e.message);
       }finally{
         btn.textContent = old; btn.disabled = false;
+      }
+    }
+
+    // ===== CLEAR DATA API =====
+    function getTarget(){
+      const r = document.querySelector('input[name="target"]:checked');
+      return r ? r.value : 'all';
+    }
+
+    async function clearData(){
+      ensureAuth();
+      const dataset = dsSel.value;
+      const target = getTarget();
+      const backup = document.getElementById('backupToggle').checked;
+
+      if(!confirm(`Xoá dữ liệu "${target}" của dataset "${dataset}"?`)) return;
+
+      const msg = document.getElementById('clearMsg');
+      const box = document.getElementById('clearActions');
+      msg.className='msg muted'; msg.textContent='Đang xử lý...'; box.innerHTML='';
+
+      const params = new URLSearchParams({ dataset, target, backup: String(!!backup) });
+      const resp = await fetch('/api/admin/clear?' + params.toString(), { method:'POST', headers: { ...authHeader() } });
+      const data = await resp.json().catch(()=>null);
+
+      if(!resp.ok || !data?.ok){
+        msg.className='msg err'; msg.textContent = (data && (data.message||data.error)) || 'Thao tác thất bại.';
+        return;
+      }
+      msg.className='msg ok'; msg.textContent='Đã dọn dữ liệu.';
+
+      // render actions
+      const acts = data.actions || [];
+      if(acts.length===0){ box.innerHTML = '<span class="muted">Không có file nào được thay đổi.</span>'; return; }
+      let html = '<table><thead><tr><th>File</th><th>Action</th><th>Trash path</th></tr></thead><tbody>';
+      for(const a of acts){
+        html += `<tr><td>${a.file||''}</td><td>${a.action||''}</td><td>${a.trash_path||''}</td></tr>`;
+      }
+      html += '</tbody></table>';
+      box.innerHTML = html;
+
+      // refresh các tab liên quan
+      if(target==='students' || target==='all') refreshStudents(1);
+      if(target==='result' || target==='all') refreshResult(1);
+    }
+
+    async function quickClear(which){
+      // which: 'students' | 'result'
+      const dataset = dsSel.value;
+      const backup = true;
+      if(!confirm(`Xoá nhanh "${which}" của dataset "${dataset}" (có backup)?`)) return;
+      const params = new URLSearchParams({ dataset, target: which, backup: String(backup) });
+      const resp = await fetch('/api/admin/clear?' + params.toString(), { method:'POST', headers: { ...authHeader() } });
+      if(resp.ok){
+        alert('Đã dọn dữ liệu: ' + which);
+        if(which==='students') refreshStudents(1);
+        if(which==='result') refreshResult(1);
+      }else{
+        const t = await resp.text().catch(()=> '');
+        alert('Thao tác thất bại: ' + (t || resp.status));
       }
     }
 
